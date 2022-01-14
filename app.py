@@ -17,18 +17,34 @@ import warnings
 
 global style
 style = None
-def setup_style():
+
+def load_theme(root, name, version=1.0):
+	path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'themes')
+	root.tk.eval(f"""\
+set base_theme_dir {path}/
+
+package ifneeded ttk::theme::{name} {version} \
+	[list source [file join $base_theme_dir {name} {name}.tcl]]
+""")
+	root.tk.call("package", "require", f"ttk::theme::{name}")
+
+def setup_style(root, background='#ddd'):
 	global style
 	if style is None:
-		style = ttk.Style()
-		style.theme_use('clam')
-		style.configure('TFrame', borderwidth=0, background='white')
-		style.configure('Table.TLabel', background='#ddd')
-		style.configure('Fill.TLabel', background='#ddd')
-		style.configure('TLabel', background='white')
-		style.configure('TButton', bd=1, relief='solid', bordercolor='#ccc')
+		# Load external themes
+		load_theme(root, 'arc', 0.1)
+
+		style = ttk.Style(root)
+
+		# Use loaded theme
+		style.theme_use('arc')
+
+		style.configure('TFrame', background='white')
+		style.configure('Fill.TFrame', background=background)
+		style.configure('TLabel', background=background)
+		style.configure('TButton', bordercolor='#ccc', background=background)
 		style.configure('Highlight.TFrame', background='blue')
-		style.configure('Toolbar.TFrame', background='#ddd')
+		style.configure('Toolbar.TFrame', background=background)
 		style.configure('TEntry', insertcolor='black')
 		style.configure('Error.TEntry', fieldbackground='#ff6961', foreground='white', insertcolor='white')
 
@@ -36,9 +52,9 @@ def setup_style():
 			foreground=[('!active', 'white'), ('active', 'white')],
 			borderwidth=[('!active', '0'), ('active', '0')])
 
-		style.configure('Fill.TFrame', background='#ddd')
+		style.configure('Fill.TFrame', background=background)
 
-		style.configure('Status.TLabel', bd=1, relief='solid', bordercolor='#ccc')
+		style.configure('Status.TLabel', bordercolor='#ccc', background='white')
 		style.configure('Error.Status.TLabel', foreground='red')
 		style.configure('Success.Status.TLabel', foreground='green')
 
@@ -239,8 +255,8 @@ class JsonView(ttk.Frame):
 		self._key = StringVar()
 		self._value = StringVar()
 
-		self.key = ttk.Entry(self._input, textvariable=self._key, style="Table.TEntry")
-		self.value = ttk.Entry(self._input, textvariable=self._value, style="Table.TEntry")
+		self.key = ttk.Entry(self._input, textvariable=self._key)
+		self.value = ttk.Entry(self._input, textvariable=self._value)
 		self.put = ttk.Button(self._input, text="Enter", command=self.add_item)
 
 		self.value.bind("<Return>", self.on_return)
@@ -301,12 +317,18 @@ class TextView(ttk.Frame):
 		self._build()
 
 	def _build(self):
-		self._text = Text(self)
+		self._yscroll = ttk.Scrollbar(self)
+		self._xscroll = ttk.Scrollbar(self, orient='horizontal')
+		self._text = Text(self, yscrollcommand=self._yscroll.set, xscrollcommand=self._xscroll.set, wrap="none")
+		self._yscroll.configure(command=self._text.yview)
+		self._xscroll.configure(command=self._text.xview)
 
 		self.columnconfigure(0, weight=1)
 		self.rowconfigure(0, weight=1)
 
 		self._text.grid(row=0, column=0, sticky='nesw')
+		self._yscroll.grid(row=0, column=1, sticky='ns')
+		self._xscroll.grid(row=1, column=0, sticky='we')
 
 	def get_data(self):
 		data = self._text.get('1.0', 'end -1 chars') # strips the newline that Tk adds for some reason
@@ -364,11 +386,19 @@ class BinaryFileView(ttk.Frame):
 		self._name.grid(row=0, column=0, sticky='nesw', ipadx=5, ipady=5)
 
 		self._filebtn = ttk.Button(self, text='Select File', command=self.set_file)
-		self._filebtn.grid(row=1, column=1, sticky='nesw', padx=5, pady=5)
+		self._filebtn.grid(row=1, column=1, columnspan=2, sticky='nesw', padx=5, pady=5)
 
 		self._filebtn.grid(row=0, column=1)
 
-		self._preview = Text(self, state='disabled', wrap="none")
+		self._preview_scrolly = ttk.Scrollbar(self)
+		self._preview_scrollx = ttk.Scrollbar(self, orient='horizontal')
+		self._preview = Text(self, state='disabled', wrap="none",
+			yscrollcommand=self._preview_scrolly.set, xscrollcommand=self._preview_scrollx.set)
+		self._preview_scrolly.configure(command=self._preview.yview)
+		self._preview_scrollx.configure(command=self._preview.xview)
+
+		self._preview_scrolly.grid(row=1, column=2, sticky='ns')
+		self._preview_scrollx.grid(row=2, column=0, columnspan=2, sticky='we')
 		self._preview.grid(row=1, column=0, columnspan=2, sticky='nesw')
 
 	def set_file(self, *_):
@@ -509,7 +539,7 @@ class Sockman(ttk.Frame):
 
 	def __init__(self, master, context, quit=None, **kw):
 		ttk.Frame.__init__(self, master, **kw)
-		setup_style()
+		setup_style(master)
 		self._master = master
 		self._ctx = context
 
@@ -590,16 +620,23 @@ class Sockman(ttk.Frame):
 		self._logs.heading('preview', text='Preview', anchor='center')
 		self._logs.heading('timestamp', text='Timestamp', anchor='center')
 
-		self._logs.grid(row=0, column=0, sticky='nesw')
+		self._logs.grid(row=0, column=0, columnspan=2, sticky='nesw')
 		self._logs.bind("<<TreeviewSelect>>", self._log_select)
 
-		self._preview = Text(out_view, state='disabled', wrap="none")
+		self._preview_scrolly = ttk.Scrollbar(out_view)
+		self._preview_scrollx = ttk.Scrollbar(out_view, orient='horizontal')
+		self._preview = Text(out_view, state='disabled', wrap="none",
+			yscrollcommand=self._preview_scrolly.set, xscrollcommand=self._preview_scrollx.set)
+		self._preview_scrolly.configure(command=self._preview.yview)
+		self._preview_scrollx.configure(command=self._preview.xview)
+		self._preview_scrolly.grid(row=1, column=1, sticky='ns')
+		self._preview_scrollx.grid(row=2, column=0, sticky='we')
 		self._preview.grid(row=1, column=0, sticky='nesw')
 
 		self._status = StringVar()
 		self._status.set("Started")
 		self._status_lbl = ttk.Label(out_view, textvariable=self._status, style='Status.TLabel')
-		self._status_lbl.grid(row=2, column=0, ipadx=5, ipady=5, sticky='nesw')
+		self._status_lbl.grid(row=3, column=0, ipadx=5, ipady=5, columnspan=2, sticky='nesw')
 
 		# menubar
 		mb = Menu(self._master)

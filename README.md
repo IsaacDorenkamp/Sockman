@@ -20,3 +20,9 @@ Running Sockman
 ---------------
 
 1. No need for a virtual environment or anything. Simple as `python3 .`
+
+Acknowledgements
+----------------
+
+Credits to [RedFantom](https://github.com/RedFantom) for his ttk theme "arc", which can be found in the
+ttkthemes repository [here](https://github.com/TkinterEP/ttkthemes/).
