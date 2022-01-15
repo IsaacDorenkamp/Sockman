@@ -1,4 +1,7 @@
-from tkinter import Text, Toplevel, Menu, ttk, StringVar, BooleanVar, filedialog, TclError
+from tkinter import *
+from tkinter import ttk
+from tkinter import commondialog
+from tkinter import filedialog
 
 from lib.websocket import *
 from lib.http import HttpRequest
@@ -17,6 +20,12 @@ import warnings
 
 global style
 style = None
+
+def parse_geometry(geo):
+	parts = geo.split('+')
+	size = [int(i) for i in parts[0].split('x')]
+	pos = [int(i) for i in parts[1:]]
+	return size, pos
 
 def load_theme(root, name, version=1.0):
 	path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'themes')
@@ -60,11 +69,55 @@ def setup_style(root, background='#ddd'):
 
 		style.configure('TProgressbar', background='#7d7')
 
+		style.configure('About.TLabel', foreground='black')
+
+version_file = os.path.join(os.path.dirname(__file__), 'VERSION.txt')
+version = None
+def get_version():
+	global version
+	if version is None:
+		with open(version_file, 'r') as fp:
+			version = fp.read()
+	
+	return version
+
 def start(fn):
 	def newfn(*args, **kwargs):
 		loop = asyncio.get_running_loop()
 		loop.create_task(fn(*args, **kwargs))
 	return newfn
+
+class AboutDialog(Toplevel):
+	def __init__(self, master):
+		Toplevel.__init__(self, master)
+		self._build()
+
+	def _build(self):
+		self.title("About Sockman")
+		self.resizable(False, False)
+		frame = ttk.Frame(self, style='Fill.TFrame')
+
+		frame.columnconfigure(0, weight=1)
+		frame.rowconfigure(1, weight=1)
+
+		top = ttk.Label(frame, text=f"Sockman v{get_version()}",
+			anchor='center', font=('Arial', 16), style='Head.About.TLabel')
+
+		desc = ttk.Label(frame, text=f"""\
+    Sockman is a utility developed by Isaac Dorenkamp \
+for the purpose of having a dedicated WebSocket client \
+tool to test server applications with. It is available for \
+use free-of-charge with no restrictions. Happy testing!
+""", anchor='nw', wraplength=300, style='About.TLabel')
+
+		top.grid(row=0, column=0, sticky='nesw', ipadx=5, ipady=5)
+		desc.grid(row=1, column=0, sticky='nesw', padx=10)
+		ttk.Button(frame, text="OK", command=self._close).grid(row=2, column=0, padx=5, pady=(0, 5))
+
+		frame.pack(expand=True, fill='both')
+
+	def _close(self, *_):
+		self.destroy()
 
 class ConnectDialog(Toplevel):
 
@@ -77,6 +130,8 @@ class ConnectDialog(Toplevel):
 		self._build()
 
 	def _build(self):
+		self.title("Connect")
+
 		self.url = StringVar()
 
 		self.frame = ttk.Frame(self, style='Fill.TFrame')
@@ -649,6 +704,9 @@ class Sockman(ttk.Frame):
 		conn = self._conn = Menu(mb, tearoff=0)
 		conn.add_command(label="Connect", command=self._connect)
 
+		about = Menu(mb, tearoff=0)
+		about.add_command(label="About Sockman", command=self._about)
+
 		recents = self.config.get('recent', valid_recents, None)
 		if recents is not None:
 			recent = Menu(conn, tearoff=0)
@@ -672,7 +730,8 @@ class Sockman(ttk.Frame):
 		conn.add_checkbutton(label="Verify SSL", onvalue=1, offvalue=0, variable=self._verify)
 
 		mb.add_cascade(label="File", menu=file)
-		mb.add_cascade(label="Connect", menu=conn)
+		mb.add_cascade(label="Connection", menu=conn)
+		mb.add_cascade(label="About", menu=about)
 
 		self._master.config(menu=mb)
 
@@ -683,6 +742,10 @@ class Sockman(ttk.Frame):
 			self._conn.entryconfig("Close", state="normal")
 		else:
 			self._conn.entryconfig("Close", state="disabled")
+
+	def _about(self):
+		dlg = AboutDialog(self._master)
+		self.show_dialog(dlg)
 
 	def _close(self):
 		if self._sock is not None and self._sock.state == WebSocket.State.OPEN:
@@ -824,9 +887,7 @@ class Sockman(ttk.Frame):
 
 				self._connecting = True
 				dlg = ConnectDialog(self)
-				dlg.transient(self._master)
-				dlg.grab_set()
-				self._master.wait_window(dlg)
+				self.show_dialog(dlg)
 				self._connecting = False
 
 				if not dlg.ok:
@@ -923,6 +984,21 @@ class Sockman(ttk.Frame):
 		if view_inst is not None:
 			self._in_view = view_inst
 			view_inst.grid(row=2, column=0, sticky='nesw')
+
+	def show_dialog(self, toplevel):
+		def center(*_):
+			pos = parse_geometry(self._master.geometry())[1]
+			size = self._master.winfo_width(), self._master.winfo_height()
+			tsize = toplevel.winfo_width(), toplevel.winfo_height()
+			cx = int(((size[0] - tsize[0]) / 2))
+			cy = int(((size[1] - tsize[1]) / 2))
+			toplevel.geometry(f'+{cx}+{cy}')
+
+		toplevel.bind("<Configure>", center)
+
+		toplevel.transient(self._master)
+		toplevel.grab_set()
+		self._master.wait_window(toplevel)
 
 	def _on_cfg(self, _):
 		self.pack(expand=True, fill='both')
