@@ -79,13 +79,20 @@ class WebSocketContext:
 		check = 0
 		while self._running:
 			now = datetime.now()
-			for sock in filter(lambda sock: sock.state == WebSocket.State.OPEN, self._socks):
+			# temporarily create strong references to all sockets
+			all_socks = tuple(filter(lambda sock: sock.state == WebSocket.State.OPEN, self._socks))
+			sock = None # to fix UnboundLocalError caused when no sockets are created
+			for sock in all_socks:
 				check += 1
 				await sock._receive_all()
 				should_ping = (sock._last_sent + timedelta(seconds=sock.timeout)) < now
 				if should_ping:
 					await sock.ping()
-				del sock
+			
+			# delete all strong references to sockets to allow them
+			# to be removed from the weakset if applicable
+			del sock
+			del all_socks
 
 			await asyncio.sleep(0.05)
 
