@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 
 import asyncio
 import base64
+import copy
 import functools
 import json
 import os
@@ -50,18 +51,17 @@ def setup_style(root, background='#ddd'):
 
 		style.configure('TFrame', background='white')
 		style.configure('Fill.TFrame', background=background)
+		style.configure('Dark.TFrame', background='#222')
 		style.configure('TLabel', background=background)
 		style.configure('TButton', bordercolor='#ccc', background=background)
+		style.configure('Bold.TButton', font=('Arial', '12', 'bold'))
 		style.configure('Highlight.TFrame', background='blue')
 		style.configure('Toolbar.TFrame', background=background)
 		style.configure('TEntry', insertcolor='black')
-		style.configure('Error.TEntry', fieldbackground='#ff6961', foreground='white', insertcolor='white')
-
-		style.map('Delete.TButton', background=[('!active', '#ff6961'), ('active', 'red')],
-			foreground=[('!active', 'white'), ('active', 'white')],
-			borderwidth=[('!active', '0'), ('active', '0')])
+		style.configure('Error.TEntry', foreground='red', insertcolor='white')
 
 		style.configure('Fill.TFrame', background=background)
+		style.map('Fill.TCheckbutton', background=[('!active', background), ('active', background)])
 
 		style.configure('Status.TLabel', bordercolor='#ccc', background='white')
 		style.configure('Error.Status.TLabel', foreground='red')
@@ -70,6 +70,7 @@ def setup_style(root, background='#ddd'):
 		style.configure('TProgressbar', background='#7d7')
 
 		style.configure('About.TLabel', foreground='black')
+
 
 version_file = os.path.join(os.path.dirname(__file__), 'VERSION.txt')
 version = None
@@ -146,7 +147,12 @@ class ConnectDialog(Toplevel):
 		self._url = entry = ttk.Entry(self.frame, textvariable=self.url)
 		entry.grid(row=0, column=1, sticky='nesw', padx=5, pady=5, ipadx=5, ipady=5)
 		entry.bind("<Return>", self._try_close)
-		ttk.Button(self.frame, text="OK", command=self._try_close, width=4).grid(row=2, column=2, sticky='e', padx=5, pady=5)
+
+		self._save = StringVar()
+		save_con = ttk.Checkbutton(self.frame, text="Save Connection?", variable=self._save, style="Fill.TCheckbutton")
+		save_con.grid(row=2, column=0, columnspan=2, padx=5, pady=5)
+
+		ttk.Button(self.frame, text="OK", command=self._try_close, width=4).grid(row=3, column=2, sticky='e', padx=5, pady=5)
 
 		# header key-val input
 		self.headers = ttk.Frame(self.frame, style='Fill.TFrame')
@@ -248,6 +254,10 @@ class ConnectDialog(Toplevel):
 		return out
 
 	@property
+	def save(self):
+		return self._save.get() == '1'
+
+	@property
 	def ok(self):
 		return self._ok
 
@@ -276,6 +286,102 @@ class ProgressDialog(Toplevel):
 			self.destroy()
 		else:
 			self._prog['value'] = int(newval * 100)
+
+def str_saved(rec):
+	target, headers = rec['url'], rec['headers']
+	return f'{target} (with {len(headers)} header{"s" if len(headers) != 1 else ""})'
+
+class ManageDialog(Toplevel):
+	def __init__(self, master, saved):
+		Toplevel.__init__(self, master)
+		self._saved = saved
+		self.result = None
+		self._build()
+
+	def _build(self):
+		self.minsize(200, 125)
+		self.frame = ttk.Frame(self, style="Dark.TFrame")
+
+		self._list = Listbox(self.frame, background='#222', foreground='white')
+		for i in reversed(self._saved):
+			self._list.insert(0, str_saved(i))
+
+		self._list.config(width=0)
+		self._list.bind("<<ListboxSelect>>", self._onselect)
+
+		self.frame.columnconfigure(0, weight=1)
+		self.frame.rowconfigure(0, weight=1)
+		self._list.grid(row=0, column=0, sticky='nesw')
+
+		self.controls = ttk.Frame(self.frame, style='Dark.TFrame')
+		self._up = ttk.Button(self.controls, text="\u02c4", width=2, style='Bold.TButton', command=self.move_up)
+		self._down = ttk.Button(self.controls, text="\u02c5", width=2, style='Bold.TButton', command=self.move_down)
+		self._remove = ttk.Button(self.controls, text="\u00d7", width=2, style='Bold.TButton', command=self.remove)
+
+		self._widgets = (self._up, self._down, self._remove)
+
+		self._up.grid(row=0, column=0, sticky='nesw')
+		self._down.grid(row=1, column=0, sticky='nesw')
+		self._remove.grid(row=2, column=0, sticky='nesw')
+
+		for btn in self._widgets:
+			btn.configure(state='disabled')
+
+		btns = ttk.Frame(self.frame, style='Dark.TFrame')
+		btns.columnconfigure(0, weight=1)
+
+		ttk.Button(btns, text="Cancel", command=self.destroy, width=5).grid(row=0, column=0)
+		ttk.Button(btns, text="OK", command=self._ok, width=3).grid(row=0, column=1, padx=(7, 0))
+
+		btns.grid(row=1, column=0, columnspan=2, sticky='e', padx=5, pady=5)
+
+		self.controls.grid(row=0, column=1, sticky='nesw')
+		self.frame.pack(expand=True, fill='both')
+
+	@property
+	def selected(self):
+		sel = self._list.curselection()
+		if len(sel) == 0:
+			return -1
+		else:
+			return sel[0]
+
+	def move_up(self):
+		idx = self.selected
+		if idx > 0:
+			val = self._saved.pop(idx)
+			self._saved.insert(idx - 1, val)
+
+			self._list.delete(idx)
+			self._list.insert(idx - 1, str_saved(val))
+
+	def move_down(self):
+		idx = self.selected
+		if idx < len(self._saved) - 1:
+			val = self._saved.pop(idx)
+			self._saved.insert(idx + 1, val)
+
+			self._list.delete(idx)
+			self._list.insert(idx + 1, str_saved(val))
+
+	def remove(self):
+		idx = self.selected
+		del self._saved[idx]
+		self._list.delete(idx)
+
+	def _ok(self):
+		self.result = self._saved
+		self.destroy()
+
+	def _onselect(self, event):
+		sel = self._list.curselection()
+		if len(sel) == 0:
+			st = 'disabled'
+		else:
+			st = 'normal'
+
+		for btn in self._widgets:
+			btn.configure(state=st)
 
 class JsonView(ttk.Frame):
 	def __init__(self, master):
@@ -552,6 +658,9 @@ class Configuration:
 	def __setitem__(self, key, val):
 		self._config[key] = val
 
+	def __delitem__(self, key):
+		del self._config[key]
+
 	def __contains__(self, key):
 		return key in self._config
 
@@ -694,7 +803,7 @@ class Sockman(ttk.Frame):
 		self._status_lbl.grid(row=3, column=0, ipadx=5, ipady=5, columnspan=2, sticky='nesw')
 
 		# menubar
-		mb = Menu(self._master)
+		self._menubar = mb = Menu(self._master)
 
 		file = Menu(mb, tearoff=0)
 		file.add_command(label="Export Logs", command=self.export_logs)
@@ -708,9 +817,10 @@ class Sockman(ttk.Frame):
 		about.add_command(label="About Sockman", command=self._about)
 
 		recents = self.config.get('recent', valid_recents, None)
-		if recents is not None:
-			recent = Menu(conn, tearoff=0)
-			for rec in recents:
+		if recents is not None and len(recents) > 0:
+			self.__create_recent()
+			recent = self._recent
+			for rec in reversed(recents):
 				try:
 					WebSocket.parse_uri(rec['url'])
 				except:
@@ -718,9 +828,7 @@ class Sockman(ttk.Frame):
 					continue
 
 				heads = len(rec["headers"])
-				recent.add_command(label=rec['url'] + f' (with {heads} header{"s" if heads != 1 else ""})', command=functools.partial(self._connect, rec))
-
-			conn.add_cascade(label="Recent", menu=recent)
+				recent.insert_command(0, label=rec['url'] + f' (with {heads} header{"s" if heads != 1 else ""})', command=functools.partial(self._connect, rec))
 
 		conn.add_command(label="Close", command=self._close)
 		self.can_close(False)
@@ -864,7 +972,11 @@ class Sockman(ttk.Frame):
 		# necessary to unlink all handlers that interact with the GUI
 		# once the GUI has been destroyed
 		if self._sock is not None:
-			self._sock.unset_handler(self.onclose, handler_type='close')
+			try:
+				self._sock.unset_handler(self.onclose, handler_type='close')
+			except ValueError:
+				# can occasionally occur
+				pass
 
 		self.config.save()
 
@@ -879,6 +991,34 @@ class Sockman(ttk.Frame):
 
 		msg = '[connection closed]'
 		self.log(msg + f'\n\nStatus: {status}', msg)
+
+	@property
+	def recent(self):
+		if not hasattr(self, '_recent'):
+			self.__create_recent()
+
+		return self._recent
+
+	def __create_recent(self):
+		self._recent = Menu(self._menubar, tearoff=0)
+		self._recent.add_separator()
+		self._recent.add_command(label="Manage...", command=self._manage_saved)
+		self._conn.insert_cascade(1, label="Saved", menu=self._recent)
+
+	def _manage_saved(self):
+		saved = copy.deepcopy(self.config['recent'])
+		dlg = ManageDialog(self, saved)
+		self.show_dialog(dlg)
+		if dlg.result is not None:
+			self._recent.delete(0, len(saved))
+
+			saved = self.config['recent'] = dlg.result
+			if len(saved) == 0:
+				self._conn.delete(1)
+				del self._recent
+			else:
+				for i in reversed(saved):
+					self._recent.insert_command(0, label=str_saved(i), command=functools.partial(self._connect, rec=i))
 
 	def _connect(self, rec=None):
 		if rec is None:
@@ -895,11 +1035,13 @@ class Sockman(ttk.Frame):
 
 				target = dlg.url.get()
 				headers = dlg.get_headers()
+				save = dlg.save
 			else:
 				return
 		else:
 			target = rec['url']
 			headers = rec['headers']
+			save = False
 
 		if self._sock is not None:
 			self._sock.close()
@@ -910,9 +1052,28 @@ class Sockman(ttk.Frame):
 			self.error("Invalid WebSocket URI.")
 			return
 
+		if save:
+			recents = self.config.get('recent', valid_recents, None)
+			data = {
+				'url': target,
+				'headers': headers
+			}
+			menu_add = False
+			if recents is not None:
+				if data not in recents:
+					self.config['recent'].insert(0, data)
+					menu_add = True
+			else:
+				self.config['recent'] = [data]
+				menu_add = True
+
+			if menu_add:
+				self.recent.insert_command(0, label=str_saved(data), command=functools.partial(self._connect, data))
+
 		try:
 			self._sock = self._ctx.create_socket(target, WebSocketContext.DEFAULT_TIMEOUT,
 				verify=bool(self._verify.get()), mode=WebSocket.Mode.EVENT, headers=headers)
+			self._sock.connect()
 			self._sock.handler(self.onmessage)
 			self._sock.handler(self.onclose, handler_type='close')
 			self._sock.handler(self.onping, handler_type='ping')
@@ -920,22 +1081,14 @@ class Sockman(ttk.Frame):
 			self._sock = None
 			self.error(str(ve))
 			return
-
-		recents = self.config.get('recent', valid_recents, None)
-		if recents is not None:
-			data = {
-				'url': target,
-				'headers': headers
-			}
-			if data not in recents:
-				self.config['recent'].insert(0, data)
-				if len(self.config['recent']) > 5:
-					self.config['recent'] = self.config['recent'][:5]
-		else:
-			self.config['recent'] = [{
-				'url': target,
-				'headers': headers
-			}]
+		except socket.gaierror:
+			self._sock = None
+			self.error("Could not resolve host.")
+			return
+		except ConnectionRefusedError:
+			self._sock = None
+			self.error("Connection refused.")
+			return
 
 		self.can_close(True)
 		self.enable()

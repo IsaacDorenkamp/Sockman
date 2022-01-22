@@ -204,29 +204,19 @@ class WebSocket:
 		self._state = WebSocket.State.CONNECTING
 
 		self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		self._sock.connect((addr, port))
 
 		self._addr = addr
 		self._port = port
 
 		self._secure = secure
-		if secure:
-			ctx = ssl.create_default_context()
-			if not verify:
-				ctx.check_hostname = False
-				ctx.verify_mode = ssl.CERT_NONE
-			self._sock = ctx.wrap_socket(self._sock, server_hostname=addr)
+		self._verify = verify
 
 		# timeout
 		self._timeout = timeout
 		self._last_sent = datetime.now()
 
-		try:
-			self._handshake(endpoint, headers)
-		except ValueError:
-			self._state = WebSocket.State.CLOSED
-			self._sock.close()
-			raise
+		self._headers = headers
+		self._endpoint = endpoint
 
 	def __del__(self):
 		if self._state == WebSocket.State.OPEN:
@@ -267,7 +257,26 @@ class WebSocket:
 		else:
 			raise ValueError("WebSocket is not in EVENT mode.")
 
+	def connect(self):
+		try:
+			self._handshake(self._endpoint, self._headers)
+		except socket.gaierror:
+			self._state = WebSocket.State.CLOSED
+			raise
+		except ValueError:
+			self._state = WebSocket.State.CLOSED
+			self._sock.close()
+			raise
+
 	def _handshake(self, endpoint, headers):
+		self._sock.connect((self._addr, self._port))
+		if self._secure:
+			ctx = ssl.create_default_context()
+			if not self._verify:
+				ctx.check_hostname = False
+				ctx.verify_mode = ssl.CERT_NONE
+			self._sock = ctx.wrap_socket(self._sock, server_hostname=self._addr)
+
 		self._sock.setblocking(True)
 		ws_key = gen_ws_key()
 
